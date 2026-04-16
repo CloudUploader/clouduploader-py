@@ -2,7 +2,9 @@
 
 ## What Was Built
 
-A production-ready Python SDK at [sdk/pythonSDK/](file:///home/rafeeque/Rafeeque/cloudUploader/sdk/pythonSDK) with 7 modules, ready for `pip install`:
+A production-ready Python SDK at https://pypi.org/project/clouduploader-py/ with 7 modules, ready for `pip install`:
+
+**Current Version:** `0.1.2`
 
 ```
 cloud_uploader/
@@ -14,6 +16,23 @@ cloud_uploader/
 ├── utils.py           # MIME types, file validation, formatting
 └── exceptions.py      # 6-class exception hierarchy
 ```
+
+## Installation & Deployment
+
+**Install from PyPI:**
+```bash
+pip install clouduploader-py
+```
+
+**Source Repository:**
+- GitHub: https://github.com/CloudUploader/clouduploader-py
+- Built with: Python 3.9+
+- License: MIT
+
+**Automated Publishing:**
+Our CI/CD pipeline automatically publishes to PyPI on every version tag push using GitHub Actions. Simply tag a release and push—the workflow handles the build and deployment.
+
+---
 
 ## Key Design Decisions
 
@@ -32,10 +51,10 @@ cloud_uploader/
 
 | Test file | Tests | Coverage |
 |---|---|---|
-| [test_exceptions.py](file:///home/rafeeque/Rafeeque/cloudUploader/sdk/pythonSDK/tests/test_exceptions.py) | 8 | Exception hierarchy, attributes, repr |
-| [test_utils.py](file:///home/rafeeque/Rafeeque/cloudUploader/sdk/pythonSDK/tests/test_utils.py) | 14 | MIME guessing (10 types), filenames, validation |
-| [test_http_client.py](file:///home/rafeeque/Rafeeque/cloudUploader/sdk/pythonSDK/tests/test_http_client.py) | 8 | Auth headers, error parsing, PUT retry |
-| [test_client.py](file:///home/rafeeque/Rafeeque/cloudUploader/sdk/pythonSDK/tests/test_client.py) | 8 | Direct upload, multipart, progress, errors |
+| test_exceptions.py | 8 | Exception hierarchy, attributes, repr |
+| test_utils.py | 14 | MIME guessing (10 types), filenames, validation |
+| test_http_client.py | 8 | Auth headers, error parsing, PUT retry |
+| test_client.py | 8 | Direct upload, multipart, progress, errors |
 
 ```
 42 passed in 0.20s ✅
