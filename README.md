@@ -1,5 +1,9 @@
 # CloudUploader Python SDK
 
+[![PyPI version](https://badge.fury.io/py/clouduploader-py.svg)](https://badge.fury.io/py/clouduploader-py)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub](https://img.shields.io/badge/github-clouduploader%2Fcloudup loader--py-blue)](https://github.com/CloudUploader/clouduploader-py)
+
 A production-ready Python SDK for the **CloudUploader** file upload platform. Upload files to S3, Cloudflare R2, MinIO, Azure Blob, or GCS using presigned URLs — with parallel multipart uploads, automatic retries, and real-time progress tracking.
 
 ## Quick Start
@@ -19,8 +23,11 @@ print(result.storage_path)
 
 ## Installation (from source)
 
+For development or building from source:
+
 ```bash
-cd sdk/pythonSDK
+git clone https://github.com/CloudUploader/clouduploader-py.git
+cd clouduploader-py
 pip install -e .
 
 # With dev dependencies (for running tests):
@@ -139,17 +146,36 @@ cloud_uploader/
 ├── utils.py           # MIME types, file validation, formatting
 └── exceptions.py      # Exception hierarchy
 ```
-## To test with your running backend:
-cd sdk/pythonSDK
+## Development & Testing
+
+### Run Tests
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+### Test with Your Backend
+
+```bash
 source .venv/bin/activate
 CLOUD_UPLOADER_API_KEY=your_key python examples/basic_upload.py path/to/file --progress
+```
 
-## Usage is exactly as specified:
-from cloud_uploader import CloudUploader
+## Contributing
 
-uploader = CloudUploader(api_key="ck_live_xxx")
-result = uploader.upload_file("video.mp4")
+We welcome contributions! Please see our [GitHub repository](https://github.com/CloudUploader/clouduploader-py) for:
+- Issue tracking
+- Pull request guidelines
+- Development setup
+
+## Support
+
+For issues, questions, or feedback:
+- 📧 Email: support@clouduploader.io
+- 🐛 Issues: [GitHub Issues](https://github.com/CloudUploader/clouduploader-py/issues)
+- 📚 Docs: [CloudUploader Documentation](https://docs.clouduploader.io/sdk/python)
 
 ## License
 
-MIT
+MIT License - See LICENSE file for details
