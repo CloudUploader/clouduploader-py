@@ -162,6 +162,17 @@ source .venv/bin/activate
 CLOUD_UPLOADER_API_KEY=your_key python examples/basic_upload.py path/to/file --progress
 ```
 
+## Publishing a New Release
+
+The PyPI publish workflow triggers on version tags (prefix `v`). To release a new version:
+
+```bash
+git tag v0.1.6
+git push origin v0.1.6
+```
+
+The GitHub Action will automatically build and publish the package to PyPI using the `PYPI_API_TOKEN` secret.
+
 ## Contributing
 
 We welcome contributions! Please see our [GitHub repository](https://github.com/CloudUploader/clouduploader-py) for:
