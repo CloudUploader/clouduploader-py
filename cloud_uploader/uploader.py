@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -71,6 +72,9 @@ class UploadOrchestrator:
                              ``None`` defers to the backend's ``chunk_size``.
         storage: Default storage backend (``r2``, ``s3``, ``minio``,
                  ``azure``, ``gcs``).
+        network_mbps: Optional hint for the server's chunk-size tuning
+                      algorithm.  Pass your measured or estimated download
+                      speed; ``None`` lets the server use its default.
     """
 
     def __init__(
@@ -80,11 +84,13 @@ class UploadOrchestrator:
         max_parallel_uploads: int = 5,
         chunk_size_override: int | None = None,
         storage: str = "r2",
+        network_mbps: float | None = None,
     ) -> None:
         self._http = http
         self._max_workers = max_parallel_uploads
         self._chunk_override = chunk_size_override
         self._storage = storage
+        self._network_mbps = network_mbps
 
     # ── Public API ──────────────────────────────────────────────────────
 
@@ -181,6 +187,19 @@ class UploadOrchestrator:
             {"upload_id": upload_id},
         )
 
+    def retry(self, upload_id: str, failed_parts: list[int]) -> dict[str, Any]:
+        """Request fresh presigned URLs for specific failed parts.
+
+        The server re-issues presigned URLs for *failed_parts* only, reusing
+        the existing multipart upload ID — no data already uploaded is lost.
+        Use the returned ``retry_urls`` dict (``{ "3": "<url>", … }``) with
+        :meth:`MultipartUploadEngine.execute_retry`.
+        """
+        return self._http.post_json(
+            "/api/upload/iaas/retry",
+            {"upload_id": upload_id, "failed_parts": failed_parts},
+        )
+
     # ── Internal helpers ────────────────────────────────────────────────
 
     def _init_upload(
@@ -190,7 +209,11 @@ class UploadOrchestrator:
             "filename": filename,
             "size": file_size,
             "storage": storage,
+            "cpu_threads": os.cpu_count() or 1,
         }
+        if self._network_mbps is not None:
+            payload["network_mbps"] = self._network_mbps
+
         try:
             resp = self._http.post_json("/api/upload/iaas/create", payload)
         except Exception as exc:
@@ -222,7 +245,6 @@ class UploadOrchestrator:
         with open(file_path, "rb") as f:
             self._http.put_binary(url, data=f, content_length=file_size)
 
-
         if progress_callback:
             try:
                 progress_callback(file_size, file_size)
@@ -237,7 +259,8 @@ class UploadOrchestrator:
         *,
         progress_callback: ProgressCallback | None = None,
     ) -> list[dict[str, object]]:
-        """Parallel multipart upload via :class:`MultipartUploadEngine`."""
+        """Parallel multipart upload with automatic retry for failed parts."""
+        upload_id: str = init_resp["upload_id"]
         chunk_size: int = self._chunk_override or int(init_resp["chunk_size"])
         presigned_urls: list[str] = init_resp["presigned_urls"]
         max_workers: int = min(
@@ -255,6 +278,49 @@ class UploadOrchestrator:
             progress_callback=progress_callback,
         )
         result = engine.execute()
+
+        # Retry failed parts once via /retry (gets fresh presigned URLs, no new multipart init)
+        if not result.ok:
+            logger.warning(
+                "%d part(s) failed on first attempt — calling /retry for upload_id=%s",
+                len(result.failed_parts),
+                upload_id,
+            )
+            try:
+                retry_resp = self.retry(upload_id, result.failed_parts)
+            except Exception as exc:
+                raise UploadFailedError(
+                    f"{len(result.failed_parts)} parts failed and /retry call failed: {exc}",
+                    upload_id=upload_id,
+                    failed_parts=result.failed_parts,
+                ) from exc
+
+            if not retry_resp.get("success"):
+                raise UploadFailedError(
+                    f"Retry init rejected: {retry_resp.get('message', retry_resp.get('error'))}",
+                    upload_id=upload_id,
+                    error_code=retry_resp.get("error"),
+                    failed_parts=result.failed_parts,
+                )
+
+            retry_result = engine.execute_retry(retry_resp["retry_urls"])
+            if not retry_result.ok:
+                raise UploadFailedError(
+                    f"{len(retry_result.failed_parts)} part(s) still failed after retry: "
+                    f"{retry_result.failed_parts}",
+                    upload_id=upload_id,
+                    failed_parts=retry_result.failed_parts,
+                )
+
+            # Merge: keep first-pass successes, replace with retried results
+            retried_nums = {p.part_number for p in retry_result.parts}
+            merged_parts = [
+                p for p in result.parts if p.part_number not in retried_nums
+            ] + retry_result.parts
+            result.parts.clear()
+            result.parts.extend(sorted(merged_parts, key=lambda p: p.part_number))
+            result.failed_parts.clear()
+
         return result.to_complete_payload()
 
     def _complete_upload(

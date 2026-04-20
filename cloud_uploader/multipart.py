@@ -89,28 +89,48 @@ class MultipartUploadEngine:
         self._progress_callback = progress_callback
         self._content_type = content_type
 
-        # thread-safe progress tracking
         self._uploaded_bytes = 0
         self._lock = threading.Lock()
 
     # ── Public API ──────────────────────────────────────────────────────
 
     def execute(self) -> MultipartUploadResult:
-        """Run the parallel upload and return aggregated results."""
-        num_parts = len(self._presigned_urls)
-        result = MultipartUploadResult()
+        """Upload all parts from the initial presigned URL list.
 
+        Returns a :class:`MultipartUploadResult` — check ``.ok`` before
+        proceeding.  Does **not** raise on part failures so the caller can
+        drive the retry flow.
+        """
+        url_map = {i + 1: url for i, url in enumerate(self._presigned_urls)}
         logger.info(
             "Starting multipart upload: %d parts, chunk=%d, workers=%d",
-            num_parts,
+            len(url_map),
             self._chunk_size,
             self._max_workers,
         )
+        return self._upload_parts(url_map)
+
+    def execute_retry(self, retry_url_map: dict[str, str]) -> MultipartUploadResult:
+        """Re-upload only failed parts using fresh presigned URLs from /retry.
+
+        Args:
+            retry_url_map: ``{ "3": "<url>", "5": "<url>" }`` as returned
+                           by the server's ``/retry`` response field
+                           ``retry_urls``.
+        """
+        url_map = {int(k): v for k, v in retry_url_map.items()}
+        logger.info("Retrying %d failed part(s)", len(url_map))
+        return self._upload_parts(url_map)
+
+    # ── Internal ────────────────────────────────────────────────────────
+
+    def _upload_parts(self, url_map: dict[int, str]) -> MultipartUploadResult:
+        result = MultipartUploadResult()
 
         with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
             futures = {
-                pool.submit(self._upload_part, part_num): part_num
-                for part_num in range(1, num_parts + 1)
+                pool.submit(self._upload_part, part_num, url): part_num
+                for part_num, url in url_map.items()
             }
 
             for future in as_completed(futures):
@@ -118,39 +138,23 @@ class MultipartUploadEngine:
                 try:
                     part_result = future.result()
                     result.parts.append(part_result)
-                    logger.debug(
-                        "Part %d/%d uploaded (etag=%s)",
-                        part_num,
-                        num_parts,
-                        part_result.etag,
-                    )
+                    logger.debug("Part %d done (etag=%s)", part_num, part_result.etag)
                 except Exception:
-                    logger.exception("Part %d/%d failed", part_num, num_parts)
+                    logger.exception("Part %d failed", part_num)
                     result.failed_parts.append(part_num)
-
-        if not result.ok:
-            raise UploadFailedError(
-                f"{len(result.failed_parts)} of {num_parts} parts failed: "
-                f"{result.failed_parts}",
-                failed_parts=result.failed_parts,
-            )
 
         return result
 
-    # ── Internal ────────────────────────────────────────────────────────
-
-    def _upload_part(self, part_number: int) -> PartResult:
-        """Read a chunk from disk and PUT it to the presigned URL."""
+    def _upload_part(self, part_number: int, url: str) -> PartResult:
+        """Read a chunk from disk and PUT it to the given presigned URL."""
         offset = (part_number - 1) * self._chunk_size
         end = min(offset + self._chunk_size, self._file_size)
         length = end - offset
 
-        # Read the chunk into memory (bounded by chunk_size, typically 5–25 MB).
         with open(self._file_path, "rb") as f:
             f.seek(offset)
             chunk_data = f.read(length)
 
-        url = self._presigned_urls[part_number - 1]
         resp = self._http.put_binary(
             url,
             data=io.BytesIO(chunk_data),
@@ -158,13 +162,8 @@ class MultipartUploadEngine:
             content_length=length,
         )
 
-
-        # S3/R2 return the ETag in the response header.
         etag = resp.headers.get("ETag", "").strip('"')
-
-        # Update aggregate progress.
         self._report_progress(length)
-
         return PartResult(part_number=part_number, etag=etag, size=length)
 
     def _report_progress(self, bytes_uploaded: int) -> None:
